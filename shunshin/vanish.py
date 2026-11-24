@@ -3,6 +3,8 @@
 import cv2
 import numpy as np
 
+from .plate import MASK_SCALE
+
 # Seconds after the trigger. The poof needs ~50ms to cover you, so the swap waits for it.
 VANISH_AT = (0.06, 0.22)
 APPEAR_AT = (0.12, 0.30)
@@ -13,12 +15,14 @@ class Vanisher:
         h, w = shape[:2]
         self.gone = False
         self._t0 = float("-inf")
-        self._prev = np.zeros((h, w), np.uint8)
+        self._size = (w, h)
+        self._small = (max(1, w // MASK_SCALE), max(1, h // MASK_SCALE))
+        self._prev = np.zeros(self._small[::-1], np.uint8)
         # Generous margins: the segmenter trails fast motion by a frame and is soft on hair,
         # so a tight cut leaves a ghostly outline of you behind. These scale with resolution.
-        grow = max(3, round(w * 0.018))
+        grow = max(1, round(w * 0.018 / MASK_SCALE))
         self._grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * grow + 1,) * 2)
-        self._feather = max(1.0, w * 0.008)
+        self._feather = max(0.6, w * 0.008 / MASK_SCALE)
 
     def toggle(self, now: float):
         self.gone = not self.gone
@@ -32,7 +36,7 @@ class Vanisher:
         return t if self.gone else 1 - t
 
     def compose(self, frame: np.ndarray, person: np.ndarray, plate, now: float) -> np.ndarray:
-        cur = (person > 0.3).astype(np.uint8)
+        cur = (cv2.resize(person, self._small, interpolation=cv2.INTER_AREA) > 0.3).astype(np.uint8)
         # Union with last frame's mask to cover segmentation lag when you move.
         hard = cv2.dilate(cv2.max(cur, self._prev), self._grow)
         self._prev = cur
@@ -42,14 +46,19 @@ class Vanisher:
         ys, xs = np.nonzero(hard)
         if not len(xs):
             return frame
-        h, w = hard.shape
+        sh, sw = hard.shape
         pad = int(3 * self._feather) + 1
-        y0, y1 = max(0, ys.min() - pad), min(h, ys.max() + pad + 1)
-        x0, x1 = max(0, xs.min() - pad), min(w, xs.max() + pad + 1)
-        alpha = cv2.GaussianBlur(hard[y0:y1, x0:x1].astype(np.float32), (0, 0), self._feather)
-        alpha = (alpha * k)[..., None]
+        sy0, sy1 = max(0, ys.min() - pad), min(sh, ys.max() + pad + 1)
+        sx0, sx1 = max(0, xs.min() - pad), min(sw, xs.max() + pad + 1)
+        alpha = cv2.GaussianBlur(hard[sy0:sy1, sx0:sx1].astype(np.float32), (0, 0), self._feather)
+        alpha = np.minimum(alpha * 2, 1)  # solid over the whole cut, soft only outside it
+        w, h = self._size
+        fx, fy = w / sw, h / sh
+        y0, y1 = int(sy0 * fy), min(h, int(sy1 * fy))
+        x0, x1 = int(sx0 * fx), min(w, int(sx1 * fx))
+        alpha = cv2.resize(alpha, (x1 - x0, y1 - y0), interpolation=cv2.INTER_LINEAR)
+        alpha *= k
         out = frame.copy()
-        roi = out[y0:y1, x0:x1].astype(np.float32)
-        roi += alpha * (plate.render((y0, y1, x0, x1)) - roi)
-        out[y0:y1, x0:x1] = np.clip(roi, 0, 255).astype(np.uint8)
+        out[y0:y1, x0:x1] = cv2.blendLinear(frame[y0:y1, x0:x1], plate.render((y0, y1, x0, x1)),
+                                            1 - alpha, alpha)
         return out

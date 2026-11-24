@@ -94,14 +94,17 @@ class CleanPlate:
         return moved
 
     def _check_moved(self, frame: np.ndarray, bg: np.ndarray) -> bool:
-        # A bump shifts the whole scene at once; slow light changes don't trip this
-        # because the learn rate keeps the plate within the threshold.
+        # A bump shifts the whole scene at once. Light changes don't trip this: global
+        # brightness is divided out below, and the learn rate absorbs slow local changes.
         s = np.s_[::MASK_SCALE, ::MASK_SCALE]  # a sparse grid is plenty to spot a whole-scene shift
         overlap = bg[s] & self.known[s]
         if overlap.sum() < 0.2 * overlap.size:
             self._mismatch_streak = 0
             return False
-        residual = frame[s][overlap].astype(np.float32) - self.plate[s][overlap]
+        live, plate = frame[s][overlap].astype(np.float32), self.plate[s][overlap]
+        # Cancel a global brightness change first: auto-exposure isn't a bump, a shifted scene is.
+        gain = float(np.clip(live.mean() / max(float(plate.mean()), 1.0), 0.5, 2.0))
+        residual = live - plate * gain
         diff = float(np.abs(residual).mean())
         if diff <= self.moved_threshold:
             # Robust std of the residual; 0.84 converts it to the grain the plate is missing

@@ -57,7 +57,10 @@ def test_camera_bump_triggers_relearn():
 def test_brief_glitch_does_not_wipe_the_plate():
     plate = CleanPlate((H, W), guard_px=3)
     plate.update(room(), person_at(60, 100))
-    plate.update(255 - room(), person_at(60, 100))  # one corrupted frame
+    rng = np.random.default_rng(2)
+    plate.update(np.zeros((H, W, 3), np.uint8), person_at(60, 100))  # a dropped, black frame
+    plate.update(room(), person_at(60, 100))
+    plate.update(rng.integers(0, 255, (H, W, 3), dtype=np.uint8), person_at(60, 100))  # garbage
     plate.update(room(), person_at(60, 100))
     assert np.abs(plate.render()[:, :50] - room()[:, :50]).mean() < 1.0
 
@@ -77,3 +80,12 @@ def test_measures_camera_grain():
         noisy = np.clip(room() + rng.normal(0, 6, (H, W, 3)), 0, 255).astype(np.uint8)
         plate.update(noisy, person_at(60, 100))
     assert 3 < plate.noise < 8
+
+
+def test_auto_exposure_jump_is_not_a_bump():
+    plate = CleanPlate((H, W), guard_px=3, moved_frames=5)
+    for _ in range(3):
+        plate.update(room(100), person_at(60, 100))
+    moved = [plate.update(room(140), person_at(60, 100)) for _ in range(20)]
+    assert not any(moved)
+    assert plate.coverage > 0.5  # learned room kept, not thrown away

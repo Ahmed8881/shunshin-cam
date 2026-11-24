@@ -8,6 +8,7 @@ A real-time virtual camera for Zoom, Google Meet, Microsoft Teams, Discord and O
 Hold a hand sign and you disappear in a ninja smoke bomb, leaving an empty room behind.
 Hold it again to come back.
 
+[![CI](https://github.com/Ahmed8881/shunshin-cam/actions/workflows/ci.yml/badge.svg)](https://github.com/Ahmed8881/shunshin-cam/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![MediaPipe](https://img.shields.io/badge/MediaPipe-Tasks-orange)
 ![OpenCV](https://img.shields.io/badge/OpenCV-4.x-green)
@@ -76,37 +77,58 @@ Each giveaway is handled explicitly:
 
 - Python 3.10+
 - A webcam
-- **Windows or macOS:** [OBS Studio](https://obsproject.com) 30+ installed. Only its virtual camera
-  driver is used; OBS doesn't need to be running.
-- **Linux:** `v4l2loopback` (`sudo modprobe v4l2loopback devices=1`)
+- A virtual camera driver:
+  - **Windows:** [OBS Studio](https://obsproject.com). If it's missing, the app offers to install
+    it for you with `winget` on first run. OBS itself never needs to be open.
+  - **macOS:** OBS Studio 30+ (`brew install --cask obs`); start its Virtual Camera once.
+  - **Linux:** `v4l2loopback` (`sudo modprobe v4l2loopback devices=1 exclusive_caps=1`)
 
 ## Installation
 
 ```bash
 git clone https://github.com/Ahmed8881/shunshin-cam.git
 cd shunshin-cam
-pip install -r requirements.txt
+pip install .
 ```
 
-The two MediaPipe models (~9 MB) are downloaded automatically on first run into `models/`.
-
-**One-time OBS setup (Windows/macOS):** open OBS, click **Start Virtual Camera**, then
-**Stop Virtual Camera**, and close OBS. This registers the driver.
+This installs a `shunshin-cam` command. The two MediaPipe models (~9 MB) are downloaded
+automatically on first run into `~/.cache/shunshin-cam`.
 
 ## Quick start
 
 ```bash
-python -m shunshin
+shunshin-cam        # or: python -m shunshin
 ```
 
 1. A preview window opens. The overlay (status bar and tips) is only shown to you, never to the call.
 2. **Lean left and right once** so it can see the wall behind you. Watch
    *background learned* climb towards 100%.
-3. In Zoom, go to **Settings → Video → Camera** and choose **OBS Virtual Camera**.
+3. Pick **OBS Virtual Camera** in your video app (steps below).
 4. Hold ✌️ for a moment. *Poof.* Hold it again to come back.
 
-> Close the preview window or press **Q** to quit. If Zoom is already using your real webcam,
-> switch Zoom to *OBS Virtual Camera* first, since only one app can open a physical camera at a time.
+> Start Shunshin Cam **before** your video app grabs the webcam: only one app can open a
+> physical camera at a time. Close the preview window or press **Q** to quit.
+
+## Using it in Zoom and Google Meet
+
+The app prints these steps in the console too, once the virtual camera is ready.
+
+**Zoom** (desktop app or browser)
+1. **Settings → Video → Camera →** *OBS Virtual Camera*.
+2. **Settings → Background & effects → None.** Zoom's own backgrounds and blur treat the smoke
+   as background and erase it.
+3. Optional: turn off *Touch up my appearance*.
+
+**Google Meet** (browser)
+1. Before joining, open **⋮ More options → Settings → Video → Camera →** *OBS Virtual Camera*.
+2. **Apply visual effects → No effect**, for the same reason as Zoom.
+3. Camera not listed? Fully quit and reopen the browser. Browsers only look for cameras at launch,
+   so a driver installed while it was open won't show up.
+
+**Teams, Discord, Slack, OBS:** choose *OBS Virtual Camera* as the camera, and turn off their
+background effects.
+
+Your self-view is mirrored in Zoom and Meet; everyone else sees you the right way round.
 
 ## Usage
 
@@ -173,14 +195,18 @@ shunshin/
 tests/             # unit tests, no camera required
 ```
 
-## Running the tests
+## Contributing
+
+Contributions are welcome! Start with [CONTRIBUTING.md](CONTRIBUTING.md). In short:
 
 ```bash
-pip install pytest
-python -m pytest
+pip install -e ".[dev]"
+ruff check .
+python -m pytest      # synthetic frames, no webcam needed
 ```
 
-The tests use synthetic frames, so they run anywhere without a webcam.
+Please read the [Code of Conduct](CODE_OF_CONDUCT.md), and report security issues as described in
+[SECURITY.md](SECURITY.md). Changes are tracked in the [changelog](CHANGELOG.md).
 
 ## Acknowledgements
 

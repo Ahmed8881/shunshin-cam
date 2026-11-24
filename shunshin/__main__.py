@@ -46,6 +46,7 @@ def open_camera(index, width, height, fps):
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     cap.set(cv2.CAP_PROP_FPS, fps)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # if we fall behind, drop old frames instead of lagging
     ok, frame = cap.read()
     if not ok:
         sys.exit(f"Could not read from camera {index}. Is another app (Zoom itself?) using it, "
@@ -123,7 +124,7 @@ def main():
             person = segment(rgb, last_ts)
             signs.submit(rgb)
             if n % PLATE_EVERY == 0 or n < 10:
-                if plate.update(frame, person):
+                if plate.update(frame, person) and now - start > 3:  # startup = auto-exposure settling
                     print("Camera moved: relearning the background.")
             n += 1
 

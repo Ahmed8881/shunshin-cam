@@ -43,6 +43,16 @@ def make_sprites(count=8, seed=7):
     return sprites
 
 
+def _opacity(t: float) -> float:
+    """Dense while the swap happens, a quick thin-out to wisps, then a slow fade to nothing."""
+    if t < 0.25:
+        return 1.0
+    if t < 0.45:
+        k = (t - 0.25) / 0.2
+        return 1.0 - 0.65 * k * k * (3 - 2 * k)
+    return 0.35 * (1 - (t - 0.45) / 0.55)
+
+
 class SmokeSystem:
     def __init__(self, shape, color=(236, 236, 240), seed=None):
         h, w = shape[:2]
@@ -88,7 +98,7 @@ class SmokeSystem:
                 vy=math.sin(ang) * speed - r.uniform(0.05, 0.2) * scale,
                 size=scale * (r.uniform(0.6, 0.9) if core else r.uniform(0.25, 0.5)),
                 grow=r.uniform(0.6, 1.3),
-                life=r.uniform(1.1, 1.6) if core else r.uniform(1.8, 3.4),
+                life=r.uniform(0.8, 1.2) if core else r.uniform(1.8, 3.2),
                 age=0.0,
                 sprite=int(r.integers(len(self.sprites))),
                 flip=bool(r.integers(2)),
@@ -128,8 +138,7 @@ class SmokeSystem:
         alpha = np.zeros((self.lh, self.lw), np.float32)
         for q in self.p:
             t = q["age"] / q["life"]
-            fade = min(1.0, max(0.0, (t - 0.3) / 0.7))  # hold dense while the swap happens, then thin out
-            opacity = min(1.0, q["age"] / 0.05) * (1 - fade * fade * (3 - 2 * fade))
+            opacity = min(1.0, q["age"] / 0.05) * _opacity(t)
             if opacity < 0.01:
                 continue
             ease = 1 - (1 - min(1.0, t * 3)) ** 3  # fast "pop" outward, then slow swell

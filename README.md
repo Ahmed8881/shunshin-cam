@@ -23,7 +23,7 @@ vanishes in a burst of smoke. This project brings it to your webcam.
 
 ## Features
 
-- **Hand-sign trigger.** Two fingers (✌️) by default, or any of 7 built-in signs.
+- **Hand-sign trigger.** Two fingers (✌️) or a closed fist (✊) by default, or any of 7 built-in signs.
   A short hold is required, so you won't vanish by accident while talking with your hands.
 - **Procedural anime smoke.** A dense poof hides the moment you disappear, then thins into
   wisps that drift upward and leave a trail behind.
@@ -85,6 +85,14 @@ Each giveaway is handled explicitly:
 
 ## Installation
 
+### Windows: just download
+
+Grab **`ShunshinCam.exe`** from the [latest release](https://github.com/Ahmed8881/shunshin-cam/releases/latest)
+and double-click it. No Python needed. To start with a virtual background, **drag an image onto
+`ShunshinCam.exe`**.
+
+### From source (any OS)
+
 ```bash
 git clone https://github.com/Ahmed8881/shunshin-cam.git
 cd shunshin-cam
@@ -104,7 +112,7 @@ shunshin-cam        # or: python -m shunshin
 2. **Lean left and right once** so it can see the wall behind you. Watch
    *background learned* climb towards 100%.
 3. Pick **OBS Virtual Camera** in your video app (steps below).
-4. Hold ✌️ for a moment. *Poof.* Hold it again to come back.
+4. Hold ✌️ or ✊ for a moment. *Poof.* Hold it again to come back.
 
 > Start Shunshin Cam **before** your video app grabs the webcam: only one app can open a
 > physical camera at a time. Close the preview window or press **Q** to quit.
@@ -130,12 +138,29 @@ background effects.
 
 Your self-view is mirrored in Zoom and Meet; everyone else sees you the right way round.
 
+## Using a virtual background
+
+Zoom's and Meet's own virtual backgrounds **erase the smoke**: their AI treats anything that
+isn't a person as background. Turn the video app's background off and let Shunshin Cam
+apply it instead:
+
+```bash
+shunshin-cam --background office.jpg
+```
+
+or drag the image onto `ShunshinCam.exe`. You vanish into the picture with no guesswork about
+what's behind you, so this mode is the most convincing of all.
+
+Already set up a background in Zoom? Zoom keeps your uploaded images in
+`%APPDATA%\Zoom\data\VirtualBkgnd_Custom` (Windows). The files have no extension, but they're
+ordinary images and work as-is.
+
 ## Usage
 
 ```text
 python -m shunshin [--camera N] [--width W] [--height H] [--fps F]
-                   [--gesture SIGN] [--hold SECONDS]
-                   [--no-virtualcam] [--no-preview]
+                   [--gesture SIGN [SIGN ...]] [--hold SECONDS]
+                   [--background IMAGE] [--no-virtualcam] [--no-preview]
 ```
 
 | Option | Default | Description |
@@ -143,7 +168,8 @@ python -m shunshin [--camera N] [--width W] [--height H] [--fps F]
 | `--camera` | `0` | Webcam index, if you have several. |
 | `--width` / `--height` | `1280` / `720` | Capture resolution. Use `640`/`360` on slower machines. |
 | `--fps` | `30` | Requested frame rate. |
-| `--gesture` | `Victory` | One of `Victory`, `Thumb_Up`, `Thumb_Down`, `Open_Palm`, `Closed_Fist`, `Pointing_Up`, `ILoveYou`. |
+| `--gesture` | `Victory Closed_Fist` | One or more of `Victory`, `Thumb_Up`, `Thumb_Down`, `Open_Palm`, `Closed_Fist`, `Pointing_Up`, `ILoveYou`. Any of them toggles. |
+| `--background` | none | Image to use as your virtual background (instead of the video app's). |
 | `--hold` | `0.35` | Seconds the sign must be held to trigger. |
 | `--no-virtualcam` | off | Preview only; don't create the virtual camera. |
 | `--no-preview` | off | Run without a window (stop with Ctrl+C). |

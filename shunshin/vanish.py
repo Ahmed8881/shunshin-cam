@@ -72,6 +72,7 @@ class Vanisher:
 def replace_background(frame: np.ndarray, person: np.ndarray, background: np.ndarray) -> np.ndarray:
     """Puts `background` behind you, using the 0..1 person mask at any resolution."""
     h, w = frame.shape[:2]
-    alpha = cv2.resize(person, (w, h), interpolation=cv2.INTER_LINEAR)
+    # Smooth the low-res mask first so scaling it up doesn't leave stair-stepped hair edges.
+    alpha = cv2.resize(cv2.GaussianBlur(person, (0, 0), 0.8), (w, h), interpolation=cv2.INTER_CUBIC)
     alpha = np.clip((alpha - 0.3) * 2.5, 0, 1)  # firm inside, soft 0.3-0.7 edge
     return cv2.blendLinear(frame, background, alpha, 1 - alpha)

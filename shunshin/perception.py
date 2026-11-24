@@ -46,8 +46,9 @@ class SignWatcher:
     keeping it off the main loop keeps the video at full frame rate.
     """
 
-    def __init__(self, gesture: str = "Victory", min_score: float = 0.6):
+    def __init__(self, gesture: str = "Victory", min_score: float = 0.6, max_hz: float = 10):
         self.gesture = gesture
+        self.period = 1 / max_hz  # plenty for a 0.35s hold, and leaves CPU for the video
         self.min_score = min_score
         self.visible = False
         self._rec = vision.GestureRecognizer.create_from_options(
@@ -77,12 +78,14 @@ class SignWatcher:
                 if not self._running:
                     return
                 rgb, self._frame = self._frame, None
-            ts = max(last_ts + 1, int((time.monotonic() - start) * 1000))  # VIDEO mode needs rising ts
+            began = time.monotonic()
+            ts = max(last_ts + 1, int((began - start) * 1000))  # VIDEO mode needs rising ts
             last_ts = ts
             gestures = self._rec.recognize_for_video(_image(rgb), ts).gestures
             self.visible = any(
                 g[0].category_name == self.gesture and g[0].score >= self.min_score for g in gestures
             )
+            time.sleep(max(0.0, self.period - (time.monotonic() - began)))
 
     def close(self):
         with self._ready:

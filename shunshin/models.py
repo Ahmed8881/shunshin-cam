@@ -3,7 +3,7 @@
 import urllib.request
 from pathlib import Path
 
-MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
+MODEL_DIR = Path.home() / ".cache" / "shunshin-cam"  # per-user: an installed package dir may be read-only
 
 MODELS = {
     "gesture_recognizer.task": "https://storage.googleapis.com/mediapipe-models/"

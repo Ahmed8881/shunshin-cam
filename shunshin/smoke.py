@@ -52,6 +52,7 @@ class SmokeSystem:
         self.color = np.array(color, np.float32)
         self.rng = np.random.default_rng(seed)
         self.sprites = make_sprites()
+        self._scaled = {}  # (sprite, flip, size) -> resized (alpha, premultiplied color)
         self.p = []  # each particle: dict(x, y, vx, vy, size, grow, life, age, sprite)
 
     @property
@@ -59,14 +60,16 @@ class SmokeSystem:
         return bool(self.p)
 
     def burst(self, person: np.ndarray, count: int = 40):
-        """Spawn a poof covering whoever is in `person` (0..1 mask, full res)."""
-        h, w = person.shape
+        """Spawn a poof covering whoever is in `person` (0..1 mask, any resolution)."""
+        w, h = self.size
+        k = w / person.shape[1]
         ys, xs = np.nonzero(person > 0.5)
-        if len(xs) < 50:  # nobody visible: puff in the middle of the frame
+        if len(xs) < 50 / k ** 2:  # nobody visible: puff in the middle of the frame
             xs, ys = np.array([w / 2]), np.array([h / 2])
             scale = 0.35 * min(w, h)
         else:
-            scale = math.sqrt(len(xs))
+            scale = math.sqrt(len(xs)) * k
+            xs, ys = xs * k, ys * k
         cx, cy = xs.mean(), ys.mean()
         r = self.rng
         for i in range(count):
@@ -103,6 +106,19 @@ class SmokeSystem:
             q["y"] += q["vy"] * dt
         self.p = [q for q in self.p if q["age"] < q["life"]]
 
+    def _sprite(self, idx, flip, size):
+        key = (idx, flip, size)
+        if key not in self._scaled:
+            a, shade = self.sprites[idx]
+            if flip:
+                a, shade = a[:, ::-1], shade[:, ::-1]
+            a = cv2.resize(a, (size, size))
+            color = (a * cv2.resize(shade, (size, size)))[..., None] * self.color
+            if len(self._scaled) > 4000:  # sizes drift over a session; don't grow forever
+                self._scaled.clear()
+            self._scaled[key] = (a, color)
+        return self._scaled[key]
+
     def render(self, frame: np.ndarray) -> np.ndarray:
         """Returns a uint8 BGR copy of `frame` with the smoke composited on top."""
         out = frame.copy()
@@ -112,7 +128,7 @@ class SmokeSystem:
         alpha = np.zeros((self.lh, self.lw), np.float32)
         for q in self.p:
             t = q["age"] / q["life"]
-            fade = np.clip((t - 0.3) / 0.7, 0, 1)  # hold dense while the swap happens, then thin out
+            fade = min(1.0, max(0.0, (t - 0.3) / 0.7))  # hold dense while the swap happens, then thin out
             opacity = min(1.0, q["age"] / 0.05) * (1 - fade * fade * (3 - 2 * fade))
             if opacity < 0.01:
                 continue
@@ -120,11 +136,8 @@ class SmokeSystem:
             size = int(q["size"] * (0.45 + 0.55 * ease + q["grow"] * t) / self.k)
             if size < 4:
                 continue
-            a_spr, s_spr = self.sprites[q["sprite"]]
-            if q["flip"]:
-                a_spr, s_spr = a_spr[:, ::-1], s_spr[:, ::-1]
-            a = cv2.resize(a_spr, (size, size)) * opacity
-            s = cv2.resize(s_spr, (size, size))
+            a, s = self._sprite(q["sprite"], q["flip"], size)
+            a = a * opacity
             x0 = int(q["x"] / self.k) - size // 2
             y0 = int(q["y"] / self.k) - size // 2
             # Clip the sprite to the layer bounds.
@@ -134,11 +147,11 @@ class SmokeSystem:
             if lx1 <= lx0 or ly1 <= ly0:
                 continue
             a = a[sy0:sy0 + ly1 - ly0, sx0:sx0 + lx1 - lx0]
-            s = s[sy0:sy0 + ly1 - ly0, sx0:sx0 + lx1 - lx0]
+            s = s[sy0:sy0 + ly1 - ly0, sx0:sx0 + lx1 - lx0] * opacity
             roi_c = color[ly0:ly1, lx0:lx1]
             roi_a = alpha[ly0:ly1, lx0:lx1]
             roi_c *= (1 - a)[..., None]
-            roi_c += (a * s)[..., None] * self.color
+            roi_c += s
             roi_a *= 1 - a
             roi_a += a
         # Only touch the part of the full-res frame the smoke actually covers.
@@ -150,10 +163,9 @@ class SmokeSystem:
         x0, x1 = int(lx0 * self.k), min(w, int(lx1 * self.k))
         y0, y1 = int(ly0 * self.k), min(h, int(ly1 * self.k))
         big = (x1 - x0, y1 - y0)
-        c = cv2.resize(color[ly0:ly1, lx0:lx1], big, interpolation=cv2.INTER_LINEAR)
-        a = cv2.resize(alpha[ly0:ly1, lx0:lx1], big, interpolation=cv2.INTER_LINEAR)
-        roi = out[y0:y1, x0:x1].astype(np.float32)
-        roi *= 1 - a[..., None]
-        roi += c
-        out[y0:y1, x0:x1] = np.clip(roi, 0, 255).astype(np.uint8)
+        a = alpha[ly0:ly1, lx0:lx1]
+        c = color[ly0:ly1, lx0:lx1] / np.maximum(a, 1e-4)[..., None]  # un-premultiply for blendLinear
+        c = cv2.resize(cv2.convertScaleAbs(c), big, interpolation=cv2.INTER_LINEAR)
+        a = cv2.resize(a, big, interpolation=cv2.INTER_LINEAR)
+        out[y0:y1, x0:x1] = cv2.blendLinear(out[y0:y1, x0:x1], c, 1 - a, a)
         return out

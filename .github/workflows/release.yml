@@ -1,0 +1,27 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install . pyinstaller
+      - name: Build ShunshinCam.exe
+        run: >
+          pyinstaller --noconfirm --onefile --console --name ShunshinCam --paths .
+          --collect-binaries mediapipe --collect-data mediapipe --collect-submodules mediapipe.tasks
+          --collect-all pyvirtualcam --exclude-module tkinter packaging/launcher.py
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ShunshinCam.exe
+          generate_release_notes: true

@@ -1,0 +1,40 @@
+name: Bug report
+description: Something doesn't work or looks wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you expected, and what you saw instead. Screenshots help (no other people's faces, please).
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `python -m shunshin --width 1280 --height 720`
+        2. Hold the Victory sign
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: app
+    attributes:
+      label: Video app
+      options: [Zoom, Google Meet, Microsoft Teams, Discord, OBS, Preview window only, Other]
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: Windows 11, Python 3.12, OBS 31, 1280x720 webcam
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output
+      render: text

@@ -32,7 +32,8 @@ class CleanPlate:
         self.moved_frames = moved_frames
         self.plate = np.zeros((h, w, 3), np.float32)
         self.known = np.zeros((h, w), bool)
-        self.view = np.zeros((h, w, 3), np.uint8)  # what render() hands out; rebuilt on each update
+        self.view = np.zeros((h, w, 3), np.uint8)  # what render() hands out
+        self._dirty = True  # view is rebuilt only when someone asks for it, i.e. while you're gone
         self.exposure = None
         self.noise = 0.0  # camera grain (std, 0-255); the averaged plate is cleaner than live video
         g = max(1, round(guard_px / MASK_SCALE))
@@ -56,7 +57,7 @@ class CleanPlate:
         self.known[:] = False
         self._fill_cache = None
         self._fill_stale = True
-        self._refresh()
+        self._dirty = True
 
     def update(self, frame: np.ndarray, person: np.ndarray) -> bool:
         """Learn from one frame. `person` is the 0..1 mask. Returns True if the camera moved."""
@@ -89,7 +90,7 @@ class CleanPlate:
         self.known |= bg
         if self.exposure is not None:
             self._stamp[bg_small.astype(bool)] = self.exposure
-        self._refresh()
+        self._dirty = True
         return moved
 
     def _check_moved(self, frame: np.ndarray, bg: np.ndarray) -> bool:
@@ -130,6 +131,9 @@ class CleanPlate:
 
     def render(self, box=None) -> np.ndarray:
         """The plate as uint8 BGR. `box` = (y0, y1, x0, x1) returns just that region."""
+        if self._dirty:
+            self._refresh()
+            self._dirty = False
         if box is None:
             return self.view
         return self.view[box[0]:box[1], box[2]:box[3]]

@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shunshin-cam"
+dynamic = ["version"]
+description = "Anime-style vanishing for Zoom, Meet and Teams: flash a hand sign and disappear in a puff of smoke."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Ahmed Butt" }]
+requires-python = ">=3.10"
+dependencies = [
+    "mediapipe>=0.10.14",
+    "opencv-python>=4.8",
+    "numpy>=1.24",
+    "pyvirtualcam>=0.11",
+]
+keywords = ["zoom", "google-meet", "virtual-camera", "mediapipe", "hand-gesture", "anime"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Video",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.5"]
+
+[project.scripts]
+shunshin-cam = "shunshin.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/Ahmed8881/shunshin-cam"
+Issues = "https://github.com/Ahmed8881/shunshin-cam/issues"
+
+[tool.setuptools]
+packages = ["shunshin"]
+
+[tool.setuptools.dynamic]
+version = { attr = "shunshin.__version__" }
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]

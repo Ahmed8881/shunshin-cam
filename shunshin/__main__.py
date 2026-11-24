@@ -66,7 +66,8 @@ DRIVER_HELP = {
     "darwin": "Install OBS Studio 30+ (https://obsproject.com or `brew install --cask obs`), "
               "start its Virtual Camera once, then run this again.",
 }
-LINUX_HELP = "Load the loopback driver: sudo apt install v4l2loopback-dkms && "              "sudo modprobe v4l2loopback devices=1 exclusive_caps=1 card_label=ShunshinCam"
+LINUX_HELP = ("Load the loopback driver: sudo apt install v4l2loopback-dkms && "
+              "sudo modprobe v4l2loopback devices=1 exclusive_caps=1 card_label=ShunshinCam")
 
 
 def _create_virtualcam(width, height, fps):

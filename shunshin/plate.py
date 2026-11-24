@@ -7,7 +7,8 @@ This is what makes the vanish believable. Every frame, every pixel that is clear
 * follows slow lighting changes (sunset, a lamp turning on) instead of freezing them,
 * corrects for webcam auto-exposure on the parts it has not seen in a while,
 * notices when the camera gets bumped and relearns instead of showing a stale room,
-* falls back to inpainting for any spot it has never seen.
+* falls back to a smooth fill for any spot it has never seen,
+* measures your camera's grain so the patch where you were isn't suspiciously clean.
 """
 
 import cv2
@@ -33,6 +34,7 @@ class CleanPlate:
         self.known = np.zeros((h, w), bool)
         self.view = np.zeros((h, w, 3), np.uint8)  # what render() hands out; rebuilt on each update
         self.exposure = None
+        self.noise = 0.0  # camera grain (std, 0-255); the averaged plate is cleaner than live video
         g = max(1, round(guard_px / MASK_SCALE))
         self._guard = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * g + 1,) * 2)
         self._small = (max(1, w // MASK_SCALE), max(1, h // MASK_SCALE))
@@ -98,7 +100,13 @@ class CleanPlate:
         if overlap.sum() < 0.2 * overlap.size:
             self._mismatch_streak = 0
             return False
-        diff = float(np.abs(frame[s][overlap].astype(np.float32) - self.plate[s][overlap]).mean())
+        residual = frame[s][overlap].astype(np.float32) - self.plate[s][overlap]
+        diff = float(np.abs(residual).mean())
+        if diff <= self.moved_threshold:
+            # Robust std of the residual; 0.84 converts it to the grain the plate is missing
+            # (with learn_rate 0.3 the plate keeps ~40% of the sensor noise itself).
+            est = 0.84 * 1.4826 * float(np.median(np.abs(residual - np.median(residual))))
+            self.noise = est if self.noise == 0 else 0.8 * self.noise + 0.2 * est
         self._mismatch_streak = self._mismatch_streak + 1 if diff > self.moved_threshold else 0
         if self._mismatch_streak >= self.moved_frames:
             self._mismatch_streak = 0

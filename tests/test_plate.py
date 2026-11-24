@@ -68,3 +68,12 @@ def test_hole_fill_matches_the_wall_and_never_goes_dark():
     known[20:110, 70:90] = False  # long narrow strip that was always behind you
     filled = fill_holes(wall * known[..., None], known)
     assert np.abs(filled.astype(int) - 200).max() <= 3
+
+
+def test_measures_camera_grain():
+    plate = CleanPlate((H, W), guard_px=3)
+    rng = np.random.default_rng(1)
+    for _ in range(40):
+        noisy = np.clip(room() + rng.normal(0, 6, (H, W, 3)), 0, 255).astype(np.uint8)
+        plate.update(noisy, person_at(60, 100))
+    assert 3 < plate.noise < 8

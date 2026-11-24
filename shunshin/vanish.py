@@ -58,7 +58,12 @@ class Vanisher:
         x0, x1 = int(sx0 * fx), min(w, int(sx1 * fx))
         alpha = cv2.resize(alpha, (x1 - x0, y1 - y0), interpolation=cv2.INTER_LINEAR)
         alpha *= k
+        fill = plate.render((y0, y1, x0, x1))
+        if plate.noise > 0.5:
+            # Fresh grain every frame, matched to the camera, so the empty spot "breathes" like video.
+            grain = np.empty(fill.shape, np.int16)
+            cv2.randn(grain, (0, 0, 0), (plate.noise,) * 3)  # per channel; a bare scalar hits only B
+            fill = cv2.add(fill, grain, dtype=cv2.CV_8U)
         out = frame.copy()
-        out[y0:y1, x0:x1] = cv2.blendLinear(frame[y0:y1, x0:x1], plate.render((y0, y1, x0, x1)),
-                                            1 - alpha, alpha)
+        out[y0:y1, x0:x1] = cv2.blendLinear(frame[y0:y1, x0:x1], fill, 1 - alpha, alpha)
         return out

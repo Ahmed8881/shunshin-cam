@@ -104,8 +104,8 @@ class SmokeSystem:
         self.p = [q for q in self.p if q["age"] < q["life"]]
 
     def render(self, frame: np.ndarray) -> np.ndarray:
-        """Composites the smoke over `frame` (uint8 or float BGR) and returns float32 BGR."""
-        out = frame.astype(np.float32)
+        """Returns a uint8 BGR copy of `frame` with the smoke composited on top."""
+        out = frame.copy()
         if not self.p:
             return out
         color = np.zeros((self.lh, self.lw, 3), np.float32)  # premultiplied
@@ -152,7 +152,8 @@ class SmokeSystem:
         big = (x1 - x0, y1 - y0)
         c = cv2.resize(color[ly0:ly1, lx0:lx1], big, interpolation=cv2.INTER_LINEAR)
         a = cv2.resize(alpha[ly0:ly1, lx0:lx1], big, interpolation=cv2.INTER_LINEAR)
-        roi = out[y0:y1, x0:x1]
+        roi = out[y0:y1, x0:x1].astype(np.float32)
         roi *= 1 - a[..., None]
         roi += c
+        out[y0:y1, x0:x1] = np.clip(roi, 0, 255).astype(np.uint8)
         return out

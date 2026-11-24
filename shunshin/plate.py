@@ -91,25 +91,32 @@ class CleanPlate:
             return True
         return False
 
-    def render(self) -> np.ndarray:
-        """The plate as float32 BGR, exposure-matched to now, with never-seen holes inpainted."""
-        out = self.plate
+    def render(self, box=None) -> np.ndarray:
+        """The plate as float32 BGR, exposure-matched to now, with never-seen holes inpainted.
+
+        `box` = (y0, y1, x0, x1) renders just that region, which is all the compositor needs.
+        """
+        if box is None:
+            box = (0, self.known.shape[0], 0, self.known.shape[1])
+        sl = np.s_[box[0]:box[1], box[2]:box[3]]
+        out = self.plate[sl]
         if self.exposure is not None:
-            out = out * np.clip(self.exposure / np.maximum(self.stamp, 1e-3), 0.6, 1.6)[..., None]
-        if not self.known.all():
-            out = np.where(self.known[..., None], out, self._holes(out))
+            out = out * np.clip(self.exposure / np.maximum(self.stamp[sl], 1e-3), 0.6, 1.6)[..., None]
+        known = self.known[sl]
+        if not known.all():
+            out = np.where(known[..., None], out, self._holes()[sl])
         return out
 
-    def _holes(self, plate: np.ndarray) -> np.ndarray:
+    def _holes(self) -> np.ndarray:
         # shortcut: inpaint at quarter res and cache until new pixels arrive; smeary on big
         # holes, which is why the HUD shows coverage and nudges you to lean aside once.
         if self._fill_cache is None:
             h, w = self.known.shape
-            small = cv2.resize(np.clip(plate, 0, 255).astype(np.uint8), (w // 4, h // 4),
+            small = cv2.resize(np.clip(self.plate, 0, 255).astype(np.uint8), (w // 4, h // 4),
                                interpolation=cv2.INTER_AREA)
             holes = cv2.resize((~self.known).astype(np.uint8), (w // 4, h // 4),
                                interpolation=cv2.INTER_NEAREST)
             filled = cv2.inpaint(small, holes, 5, cv2.INPAINT_TELEA)
             filled = cv2.GaussianBlur(filled, (0, 0), 2)
-            self._fill_cache = cv2.resize(filled, (w, h), interpolation=cv2.INTER_CUBIC)
-        return self._fill_cache.astype(np.float32)
+            self._fill_cache = cv2.resize(filled, (w, h), interpolation=cv2.INTER_CUBIC).astype(np.float32)
+        return self._fill_cache

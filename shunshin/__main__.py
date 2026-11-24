@@ -9,8 +9,8 @@ import sys
 import time
 
 import cv2
-import numpy as np
 
+from .camera import Camera
 from .perception import Segmenter, SignWatcher
 from .plate import CleanPlate
 from .smoke import SmokeSystem
@@ -20,7 +20,9 @@ from .vanish import Vanisher
 GESTURES = ["Victory", "Thumb_Up", "Thumb_Down", "Open_Palm", "Closed_Fist", "Pointing_Up", "ILoveYou"]
 WINDOW = "Shunshin Cam (preview: only you see the overlay)"
 PLATE_EVERY = 3  # the room changes slowly; learning every 3rd frame saves CPU for the video
-MODEL_SCALE = 2  # both models shrink input to ~256px internally, so half res costs nothing
+# Both models shrink their input to ~256px internally, so feeding them less costs nothing.
+# Hands get half res so small, distant hands still have enough pixels for landmarks.
+SEG_SCALE, HAND_SCALE = 4, 2
 
 
 def parse_args():
@@ -39,21 +41,13 @@ def parse_args():
 
 
 def open_camera(index, width, height, fps):
-    backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
-    cap = cv2.VideoCapture(index, backend)
-    # Most webcams only reach 720p30 over MJPG; the default raw format drops to ~10 fps.
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-    cap.set(cv2.CAP_PROP_FPS, fps)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # if we fall behind, drop old frames instead of lagging
-    ok, frame = cap.read()
-    if not ok:
-        sys.exit(f"Could not read from camera {index}. Is another app (Zoom itself?) using it, "
-                 "or is the privacy shutter closed?")
-    if frame.mean() < 3:
+    try:
+        cam = Camera(index, width, height, fps)
+    except RuntimeError as e:
+        sys.exit(str(e))
+    if cam.first.mean() < 3:
         print("Warning: the camera image is almost black. Check the privacy shutter or lighting.")
-    return cap, frame
+    return cam, cam.first
 
 
 def open_virtualcam(width, height, fps):
@@ -103,25 +97,22 @@ def main():
     cam = None if args.no_virtualcam else open_virtualcam(w, h, args.fps)
 
     start = last = time.monotonic()
-    last_ts, fps, n, bad = -1, 0.0, 0, 0
+    last_ts, fps, n = -1, 0.0, 0
     print(f"Running. Hold the {args.gesture} sign to vanish, hold it again to come back.")
     try:
         while True:
-            ok, frame = cap.read()
-            if not ok:
-                bad += 1
-                if bad > 30:
-                    sys.exit("Lost the camera feed.")
-                continue
-            bad = 0
+            frame = cap.read()
+            if frame is None:
+                sys.exit("Lost the camera feed.")
             now = time.monotonic()
             dt, last = now - last, now
             fps = 0.9 * fps + 0.1 / max(dt, 1e-3)
 
-            small = cv2.resize(frame, (w // MODEL_SCALE, h // MODEL_SCALE), interpolation=cv2.INTER_AREA)
-            rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+            half = cv2.resize(frame, (w // HAND_SCALE, h // HAND_SCALE), interpolation=cv2.INTER_AREA)
+            rgb = cv2.cvtColor(half, cv2.COLOR_BGR2RGB)
+            quarter = cv2.resize(rgb, (w // SEG_SCALE, h // SEG_SCALE), interpolation=cv2.INTER_AREA)
             last_ts = max(last_ts + 1, int((now - start) * 1000))
-            person = segment(rgb, last_ts)
+            person = segment(quarter, last_ts)
             signs.submit(rgb)
             if n % PLATE_EVERY == 0 or n < 10:
                 if plate.update(frame, person) and now - start > 3:  # startup = auto-exposure settling
@@ -152,7 +143,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        cap.release()
+        cap.close()
         signs.close()
         segment.close()
         if cam is not None:

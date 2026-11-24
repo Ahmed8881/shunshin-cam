@@ -1,7 +1,7 @@
 """Shunshin Cam: flash a hand sign on your video call and vanish in a puff of smoke.
 
     python -m shunshin                 # webcam -> virtual camera + preview window
-    python -m shunshin --gesture Thumb_Up --width 640 --height 480
+    python -m shunshin --gesture Thumb_Up Open_Palm --width 640 --height 480
 """
 
 import argparse
@@ -34,8 +34,8 @@ def parse_args():
     p.add_argument("--width", type=int, default=1280)
     p.add_argument("--height", type=int, default=720)
     p.add_argument("--fps", type=int, default=30)
-    p.add_argument("--gesture", choices=GESTURES, default="Victory",
-                   help="hand sign that toggles the vanish (default Victory = two fingers)")
+    p.add_argument("--gesture", nargs="+", choices=GESTURES, default=["Victory", "Closed_Fist"],
+                   help="hand signs that toggle the vanish (default: Victory = two fingers, Closed_Fist)")
     p.add_argument("--hold", type=float, default=0.35, help="seconds to hold the sign (default 0.35)")
     p.add_argument("--background", metavar="IMAGE",
                    help="your own virtual background; use it instead of Zoom/Meet's, which erase the smoke")
@@ -114,7 +114,7 @@ def draw_hud(img, vanisher, plate, trigger, now, fps, gesture):
     state = "GONE" if vanisher.gone else "VISIBLE"
     color = (80, 200, 255) if vanisher.gone else (120, 230, 120)
     cv2.rectangle(img, (0, 0), (w, 34), (20, 20, 20), -1)
-    cv2.putText(img, f"{state}   sign: {gesture}   background learned: {plate.coverage:.0%}   "
+    cv2.putText(img, f"{state}   sign: {' / '.join(gesture)}   background learned: {plate.coverage:.0%}   "
                 f"{fps:.0f} fps", (10, 23), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 1, cv2.LINE_AA)
     charge = trigger.progress(now)
     if charge > 0:
@@ -149,7 +149,7 @@ def main():
 
     start = last = time.monotonic()
     last_ts, fps, n = -1, 0.0, 0
-    print(f"Running. Hold the {args.gesture} sign to vanish, hold it again to come back.")
+    print(f"Running. Hold {' or '.join(args.gesture)} to vanish, and again to come back.")
     try:
         while True:
             frame = cap.read()

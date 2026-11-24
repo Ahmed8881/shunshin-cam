@@ -47,8 +47,6 @@ def open_camera(index, width, height, fps):
         cam = Camera(index, width, height, fps)
     except RuntimeError as e:
         sys.exit(str(e))
-    if cam.first.mean() < 3:
-        print("Warning: the camera image is almost black. Check the privacy shutter or lighting.")
     return cam, cam.first
 
 
@@ -163,6 +161,9 @@ def main():
                 if plate.update(frame, person) and now - start > 3:  # startup = auto-exposure settling
                     print("Camera moved: relearning the background.")
             n += 1
+            if n == 60 and frame.mean() < 3:  # first frames are always dark while the sensor wakes up
+                print("Your webcam is sending a black picture. Usually another app (Zoom, Meet, Teams) "
+                      "has it open: switch that app to 'OBS Virtual Camera', then restart this.")
 
             key = -1 if args.no_preview else cv2.waitKey(1) & 0xFF
             if trigger.update(signs.visible, now) or key in (ord("v"), ord("V")):

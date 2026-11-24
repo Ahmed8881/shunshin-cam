@@ -1,6 +1,6 @@
 import numpy as np
 
-from shunshin.plate import CleanPlate
+from shunshin.plate import CleanPlate, fill_holes
 
 H, W = 120, 160
 
@@ -60,3 +60,11 @@ def test_brief_glitch_does_not_wipe_the_plate():
     plate.update(255 - room(), person_at(60, 100))  # one corrupted frame
     plate.update(room(), person_at(60, 100))
     assert np.abs(plate.render()[:, :50] - room()[:, :50]).mean() < 1.0
+
+
+def test_hole_fill_matches_the_wall_and_never_goes_dark():
+    wall = np.full((H, W, 3), 200, np.uint8)
+    known = np.ones((H, W), bool)
+    known[20:110, 70:90] = False  # long narrow strip that was always behind you
+    filled = fill_holes(wall * known[..., None], known)
+    assert np.abs(filled.astype(int) - 200).max() <= 3

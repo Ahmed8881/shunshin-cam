@@ -14,6 +14,8 @@ import cv2
 import numpy as np
 
 BORDER = 0.12  # outer frame strip used to measure exposure; usually wall, not person
+MASK_SCALE = 4  # masks come from a 256px model, so mask maths at 1/4 res loses nothing
+REFILL_EVERY = 5  # updates between hole re-fills (~0.5s at 30fps with learning every 3rd frame)
 
 
 def _luma(img: np.ndarray) -> np.ndarray:
@@ -21,7 +23,7 @@ def _luma(img: np.ndarray) -> np.ndarray:
 
 
 class CleanPlate:
-    def __init__(self, shape, learn_rate: float = 0.08, guard_px: int = 25,
+    def __init__(self, shape, learn_rate: float = 0.3, guard_px: int = 25,
                  moved_threshold: float = 28.0, moved_frames: int = 12):
         h, w = shape[:2]
         self.learn_rate = learn_rate
@@ -29,14 +31,20 @@ class CleanPlate:
         self.moved_frames = moved_frames
         self.plate = np.zeros((h, w, 3), np.float32)
         self.known = np.zeros((h, w), bool)
-        self.stamp = np.ones((h, w), np.float32)  # exposure level when each pixel was last seen
+        self.view = np.zeros((h, w, 3), np.uint8)  # what render() hands out; rebuilt on each update
         self.exposure = None
-        self._guard = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * guard_px + 1,) * 2)
+        g = max(1, round(guard_px / MASK_SCALE))
+        self._guard = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * g + 1,) * 2)
+        self._small = (max(1, w // MASK_SCALE), max(1, h // MASK_SCALE))
+        # Exposure level when each (1/4 res) pixel was last seen; light changes are smooth anyway.
+        self._stamp = np.ones(self._small[::-1], np.float32)
         self._border = np.ones((h, w), bool)
         bh, bw = int(h * BORDER), int(w * BORDER)
         self._border[bh:h - bh, bw:w - bw] = False
         self._mismatch_streak = 0
         self._fill_cache = None
+        self._fill_stale = True
+        self._fill_age = 0
 
     @property
     def coverage(self) -> float:
@@ -45,78 +53,111 @@ class CleanPlate:
     def reset(self):
         self.known[:] = False
         self._fill_cache = None
+        self._fill_stale = True
+        self._refresh()
 
     def update(self, frame: np.ndarray, person: np.ndarray) -> bool:
         """Learn from one frame. `person` is the 0..1 mask. Returns True if the camera moved."""
-        f = frame.astype(np.float32)
+        h, w = self.known.shape
         # Grow the person mask so hair fringes, hands and the shadow right next to you stay out.
-        bg = cv2.dilate((person > 0.15).astype(np.uint8), self._guard) == 0
+        small = (cv2.resize(person, self._small, interpolation=cv2.INTER_AREA) > 0.15).astype(np.uint8)
+        bg_small = 1 - cv2.dilate(small, self._guard)
+        bg8 = cv2.resize(bg_small, (w, h), interpolation=cv2.INTER_NEAREST)
+        bg = bg8.astype(bool)
 
-        moved = self._check_moved(f, bg)
+        moved = self._check_moved(frame, bg)
         if moved:
             self.reset()
         elif self._mismatch_streak:
             return False  # possible bump: don't learn from it until it's confirmed or gone
 
-        ref = bg & self._border
-        if ref.sum() > 500:
-            level = float(_luma(f[ref]).mean())
+        ref = (bg & self._border)[::MASK_SCALE, ::MASK_SCALE]
+        if ref.sum() > 30:
+            level = float(_luma(frame[::MASK_SCALE, ::MASK_SCALE][ref].astype(np.float32)).mean())
             if self.exposure is None:
                 self.exposure = level
-                self.stamp[:] = level
-            self.exposure = 0.9 * self.exposure + 0.1 * level
+                self._stamp[:] = level
+            self.exposure = 0.5 * self.exposure + 0.5 * level  # mean of many px: barely noisy
 
         fresh = bg & ~self.known
-        blend = bg & self.known
-        self.plate[fresh] = f[fresh]
-        self.plate[blend] += self.learn_rate * (f[blend] - self.plate[blend])
+        cv2.accumulateWeighted(frame, self.plate, self.learn_rate, mask=bg8 & self.known.view(np.uint8))
+        if fresh.any():
+            np.copyto(self.plate, frame, where=fresh[..., None], casting="unsafe")
+            self._fill_stale = True
         self.known |= bg
         if self.exposure is not None:
-            self.stamp[bg] = self.exposure
-        if fresh.any():
-            self._fill_cache = None
+            self._stamp[bg_small.astype(bool)] = self.exposure
+        self._refresh()
         return moved
 
-    def _check_moved(self, f: np.ndarray, bg: np.ndarray) -> bool:
+    def _check_moved(self, frame: np.ndarray, bg: np.ndarray) -> bool:
         # A bump shifts the whole scene at once; slow light changes don't trip this
         # because the learn rate keeps the plate within the threshold.
-        overlap = bg & self.known
-        if overlap.sum() < 0.2 * bg.size:
+        s = np.s_[::MASK_SCALE, ::MASK_SCALE]  # a sparse grid is plenty to spot a whole-scene shift
+        overlap = bg[s] & self.known[s]
+        if overlap.sum() < 0.2 * overlap.size:
             self._mismatch_streak = 0
             return False
-        diff = float(np.abs(f[overlap] - self.plate[overlap]).mean())
+        diff = float(np.abs(frame[s][overlap].astype(np.float32) - self.plate[s][overlap]).mean())
         self._mismatch_streak = self._mismatch_streak + 1 if diff > self.moved_threshold else 0
         if self._mismatch_streak >= self.moved_frames:
             self._mismatch_streak = 0
             return True
         return False
 
-    def render(self, box=None) -> np.ndarray:
-        """The plate as float32 BGR, exposure-matched to now, with never-seen holes inpainted.
-
-        `box` = (y0, y1, x0, x1) renders just that region, which is all the compositor needs.
-        """
-        if box is None:
-            box = (0, self.known.shape[0], 0, self.known.shape[1])
-        sl = np.s_[box[0]:box[1], box[2]:box[3]]
-        out = self.plate[sl]
+    def _refresh(self):
+        """Rebuilds the uint8 view: exposure-matched to now, never-seen holes inpainted."""
+        h, w = self.known.shape
+        gain = np.ones_like(self._stamp)
         if self.exposure is not None:
-            out = out * np.clip(self.exposure / np.maximum(self.stamp[sl], 1e-3), 0.6, 1.6)[..., None]
-        known = self.known[sl]
-        if not known.all():
-            out = np.where(known[..., None], out, self._holes()[sl])
-        return out
+            gain = np.clip(self.exposure / np.maximum(self._stamp, 1e-3), 0.6, 1.6)
+        if np.abs(gain - 1).max() > 0.01:
+            # NEAREST keeps gain blocks aligned with the 4px blocks the plate was learned in.
+            gain = cv2.resize(gain, (w, h), interpolation=cv2.INTER_NEAREST)
+            self.view = cv2.convertScaleAbs(cv2.multiply(self.plate, cv2.merge([gain] * 3)))
+        else:
+            self.view = cv2.convertScaleAbs(self.plate)
+        if not self.known.all():
+            cv2.copyTo(self._holes(self.view), (~self.known).view(np.uint8), self.view)
 
-    def _holes(self) -> np.ndarray:
-        # shortcut: inpaint at quarter res and cache until new pixels arrive; smeary on big
-        # holes, which is why the HUD shows coverage and nudges you to lean aside once.
-        if self._fill_cache is None:
+    def render(self, box=None) -> np.ndarray:
+        """The plate as uint8 BGR. `box` = (y0, y1, x0, x1) returns just that region."""
+        if box is None:
+            return self.view
+        return self.view[box[0]:box[1], box[2]:box[3]]
+
+    def _holes(self, view: np.ndarray) -> np.ndarray:
+        # shortcut: a smooth push-pull fill from the surrounding wall, redone at most every
+        # REFILL_EVERY updates; it can't invent texture, which is why the HUD shows coverage
+        # and nudges you to lean aside once.
+        self._fill_age += 1
+        if self._fill_cache is None or (self._fill_stale and self._fill_age >= REFILL_EVERY):
+            self._fill_stale, self._fill_age = False, 0
             h, w = self.known.shape
-            small = cv2.resize(np.clip(self.plate, 0, 255).astype(np.uint8), (w // 4, h // 4),
-                               interpolation=cv2.INTER_AREA)
-            holes = cv2.resize((~self.known).astype(np.uint8), (w // 4, h // 4),
-                               interpolation=cv2.INTER_NEAREST)
-            filled = cv2.inpaint(small, holes, 5, cv2.INPAINT_TELEA)
-            filled = cv2.GaussianBlur(filled, (0, 0), 2)
-            self._fill_cache = cv2.resize(filled, (w, h), interpolation=cv2.INTER_CUBIC).astype(np.float32)
+            self._fill_cache = cv2.resize(fill_holes(view, self.known), (w, h),
+                                          interpolation=cv2.INTER_CUBIC)
         return self._fill_cache
+
+
+def fill_holes(img: np.ndarray, known: np.ndarray, scale: int = 8) -> np.ndarray:
+    """Fills unknown pixels with a smooth average of nearby known ones, at 1/`scale` res.
+
+    Push-pull: shrink colour*weight and weight together until every cell has data, then
+    grow back, keeping real data wherever it exists. Unknown pixels never leak in, which
+    is what made plain inpainting smear dark streaks.
+    """
+    h, w = known.shape
+    size = (max(1, w // scale), max(1, h // scale))
+    wt = cv2.resize(known.astype(np.float32), size, interpolation=cv2.INTER_AREA)
+    col = cv2.resize(img.astype(np.float32) * known[..., None], size, interpolation=cv2.INTER_AREA)
+    pyramid = [(col, wt)]
+    while min(wt.shape) > 2:
+        col, wt = cv2.pyrDown(col), cv2.pyrDown(wt)
+        pyramid.append((col, wt))
+    col, wt = pyramid.pop()
+    out = col / np.maximum(wt, 1e-6)[..., None]
+    for col, wt in reversed(pyramid):
+        up = cv2.pyrUp(out, dstsize=wt.shape[::-1])
+        a = np.minimum(wt * 4, 1)[..., None]  # trust local data once a cell is ~1/4 known
+        out = a * col / np.maximum(wt, 1e-6)[..., None] + (1 - a) * up
+    return cv2.convertScaleAbs(out)

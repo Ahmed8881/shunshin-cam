@@ -5,6 +5,8 @@
 """
 
 import argparse
+import shutil
+import subprocess
 import sys
 import time
 
@@ -50,17 +52,59 @@ def open_camera(index, width, height, fps):
     return cam, cam.first
 
 
+CALL_SETUP = """
+  Zoom:         Settings > Video > Camera > "{device}"
+                Settings > Background & effects > None   (Zoom's backgrounds erase the smoke)
+  Google Meet:  before joining: More options > Settings > Video > Camera > "{device}"
+                Visual effects > No effect   (same reason)
+                Not listed? Fully quit and reopen the browser; it only scans cameras at launch.
+  Teams/Discord/OBS: pick "{device}" as the camera.
+"""
+
+DRIVER_HELP = {
+    "win32": "Install OBS Studio (https://obsproject.com) and run this again.",
+    "darwin": "Install OBS Studio 30+ (https://obsproject.com or `brew install --cask obs`), "
+              "start its Virtual Camera once, then run this again.",
+}
+LINUX_HELP = "Load the loopback driver: sudo apt install v4l2loopback-dkms && "              "sudo modprobe v4l2loopback devices=1 exclusive_caps=1 card_label=ShunshinCam"
+
+
+def _create_virtualcam(width, height, fps):
+    import pyvirtualcam
+    return pyvirtualcam.Camera(width, height, fps, fmt=pyvirtualcam.PixelFormat.BGR)
+
+
+def _offer_obs_install() -> bool:
+    """On Windows, OBS ships the virtual camera driver; offer a one-key winget install."""
+    if sys.platform != "win32" or not sys.stdin.isatty() or not shutil.which("winget"):
+        return False
+    try:
+        answer = input("The virtual camera driver comes with OBS Studio. Install it now with winget? [Y/n] ")
+    except EOFError:  # some terminals report a closed stdin as a tty
+        return False
+    if answer.strip().lower() not in ("", "y", "yes"):
+        return False
+    cmd = ["winget", "install", "--id", "OBSProject.OBSStudio", "-e",
+           "--accept-package-agreements", "--accept-source-agreements"]
+    return subprocess.run(cmd).returncode == 0
+
+
 def open_virtualcam(width, height, fps):
     try:
-        import pyvirtualcam
-        cam = pyvirtualcam.Camera(width, height, fps, fmt=pyvirtualcam.PixelFormat.BGR)
+        cam = _create_virtualcam(width, height, fps)
     except Exception as e:  # missing driver is the common case; preview still works
-        print(f"Virtual camera unavailable ({e}).\n"
-              "  Install OBS Studio (https://obsproject.com), open it once, click 'Start Virtual "
-              "Camera' then 'Stop', close OBS, and run this again.\n"
-              "  Continuing with the preview window only.")
-        return None
-    print(f"Virtual camera ready: pick '{cam.device}' as your camera in Zoom/Meet/Teams.")
+        print(f"Virtual camera unavailable: {e}")
+        cam = None
+        if _offer_obs_install():
+            try:
+                cam = _create_virtualcam(width, height, fps)
+            except Exception as e2:
+                print(f"Still unavailable after installing OBS ({e2}). Try restarting your computer.")
+        if cam is None:
+            print("  " + DRIVER_HELP.get(sys.platform, LINUX_HELP))
+            print("  Continuing with the preview window only.")
+            return None
+    print("Virtual camera ready. To use it in a call:" + CALL_SETUP.format(device=cam.device))
     return cam
 
 

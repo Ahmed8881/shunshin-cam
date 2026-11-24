@@ -1,7 +1,7 @@
 import numpy as np
 
-from shunshin.plate import CleanPlate
-from shunshin.vanish import Vanisher
+from shunshin.plate import CleanPlate, ImagePlate
+from shunshin.vanish import Vanisher, replace_background
 
 H, W = 120, 160
 ROOM = np.full((H, W, 3), 90, np.uint8)
@@ -58,3 +58,17 @@ def test_moving_while_gone_stays_hidden():
         frame, person = np.roll(frame, shift, 1), np.roll(person, shift, 1)
         out = v.compose(frame, person, plate, now=1.0 + shift)
         assert np.abs(out.astype(int) - ROOM).max() <= 2
+
+
+def test_virtual_background_mode_vanishes_into_the_picture():
+    picture = np.zeros((H * 2, W * 3, 3), np.uint8)  # different size and aspect than the camera
+    picture[..., 1] = 200
+    plate = ImagePlate(picture, (H, W))
+    frame, person = scene()
+    backed = replace_background(frame, person, plate.view)
+    assert (backed[5, 5] == plate.view[5, 5]).all()  # wall replaced
+    assert (backed[80, 80] == frame[80, 80]).all()  # you kept
+    v = Vanisher((H, W))
+    v.toggle(now=0.0)
+    out = v.compose(backed, person, plate, now=1.0)
+    assert np.abs(out.astype(int) - plate.view).max() <= 2

@@ -176,3 +176,34 @@ def fill_holes(img: np.ndarray, known: np.ndarray, scale: int = 8) -> np.ndarray
         a = np.minimum(wt * 4, 1)[..., None]  # trust local data once a cell is ~1/4 known
         out = a * col / np.maximum(wt, 1e-6)[..., None] + (1 - a) * up
     return cv2.convertScaleAbs(out)
+
+
+class ImagePlate:
+    """A fixed background picture with the CleanPlate interface, for virtual-background mode.
+
+    Video apps' own virtual backgrounds erase the smoke, so instead we composite the picture
+    ourselves; since we know exactly what's behind you, the vanish needs no learning at all.
+    """
+
+    noise = 0.0
+    coverage = 1.0
+
+    def __init__(self, image: np.ndarray, shape):
+        h, w = shape[:2]
+        ih, iw = image.shape[:2]
+        s = max(w / iw, h / ih)  # cover the frame, then centre-crop, like Zoom does
+        size = (max(w, round(iw * s)), max(h, round(ih * s)))
+        image = cv2.resize(image, size, interpolation=cv2.INTER_AREA)
+        y, x = (image.shape[0] - h) // 2, (image.shape[1] - w) // 2
+        self.view = np.ascontiguousarray(image[y:y + h, x:x + w])
+
+    def update(self, frame, person) -> bool:
+        return False
+
+    def reset(self):
+        pass
+
+    def render(self, box=None) -> np.ndarray:
+        if box is None:
+            return self.view
+        return self.view[box[0]:box[1], box[2]:box[3]]

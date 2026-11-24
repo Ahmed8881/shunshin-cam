@@ -14,10 +14,10 @@ import cv2
 
 from .camera import Camera
 from .perception import Segmenter, SignWatcher
-from .plate import CleanPlate
+from .plate import CleanPlate, ImagePlate
 from .smoke import SmokeSystem
 from .trigger import GestureTrigger
-from .vanish import Vanisher
+from .vanish import Vanisher, replace_background
 
 GESTURES = ["Victory", "Thumb_Up", "Thumb_Down", "Open_Palm", "Closed_Fist", "Pointing_Up", "ILoveYou"]
 WINDOW = "Shunshin Cam (preview: only you see the overlay)"
@@ -37,6 +37,8 @@ def parse_args():
     p.add_argument("--gesture", choices=GESTURES, default="Victory",
                    help="hand sign that toggles the vanish (default Victory = two fingers)")
     p.add_argument("--hold", type=float, default=0.35, help="seconds to hold the sign (default 0.35)")
+    p.add_argument("--background", metavar="IMAGE",
+                   help="your own virtual background; use it instead of Zoom/Meet's, which erase the smoke")
     p.add_argument("--no-virtualcam", action="store_true", help="preview only, don't send to Zoom")
     p.add_argument("--no-preview", action="store_true", help="no window; stop with Ctrl+C")
     return p.parse_args()
@@ -133,7 +135,13 @@ def main():
 
     segment = Segmenter()
     signs = SignWatcher(args.gesture)
-    plate = CleanPlate(frame.shape)
+    if args.background:
+        image = cv2.imread(args.background)
+        if image is None:
+            sys.exit(f"Could not read the background image: {args.background}")
+        plate = ImagePlate(image, frame.shape)
+    else:
+        plate = CleanPlate(frame.shape)
     smoke = SmokeSystem(frame.shape)
     vanisher = Vanisher(frame.shape)
     trigger = GestureTrigger(hold_s=args.hold)
@@ -174,6 +182,8 @@ def main():
             if key in (ord("q"), ord("Q"), 27):
                 break
 
+            if args.background:
+                frame = replace_background(frame, person, plate.view)
             out = vanisher.compose(frame, person, plate, now)
             smoke.step(dt)
             out = smoke.render(out)
